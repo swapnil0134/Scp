@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
@@ -14,17 +15,36 @@ COOLDOWN_MINS = 30
 BASE_DIR = "." # Current directory for GitHub persistence
 STATE_FILE = os.path.join(BASE_DIR, "trading_state.json")
 JOURNAL_FILE = os.path.join(BASE_DIR, "trading_journal.csv")
+LOG_FILE = os.path.join(BASE_DIR, "activity.log")
 API_KEY = os.getenv("POLYGON_API_KEY")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
 
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"balance": INITIAL_CAPITAL, "active_trade": None, "last_exit_time": None}
+        state = {"balance": INITIAL_CAPITAL, "active_trade": None, "last_exit_time": None}
+        save_state(state)
+        return state
     with open(STATE_FILE, 'r') as f:
         return json.load(f)
 
 def save_state(state):
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f, indent=4)
+
+def init_journal():
+    if not os.path.exists(JOURNAL_FILE):
+        df = pd.DataFrame(columns=['entry_time', 'exit_time', 'type', 'entry_price', 'exit_price', 'qty', 'pnl', 'final_balance'])
+        df.to_csv(JOURNAL_FILE, index=False)
+        logging.info("Initialized trading journal.")
 
 def log_to_journal(trade_data):
     df = pd.DataFrame([trade_data])
@@ -36,8 +56,15 @@ def get_data():
     end = datetime.now()
     start = end - timedelta(minutes=250)
     url = f"https://api.polygon.io/v2/aggs/ticker/{TICKER}/range/1/minute/{int(start.timestamp()*1000)}/{int(end.timestamp()*1000)}?apiKey={API_KEY}"
-    resp = requests.get(url).json()
-    if "results" not in resp: return pd.DataFrame()
+    try:
+        resp = requests.get(url).json()
+    except Exception as e:
+        logging.error(f"API request failed: {e}")
+        return pd.DataFrame()
+
+    if "results" not in resp:
+        logging.error(f"No results in response: {resp}")
+        return pd.DataFrame()
     
     df = pd.DataFrame(resp["results"])
     df.rename(columns={'o':'Open', 'h':'High', 'l':'Low', 'c':'Close', 't':'Timestamp'}, inplace=True)
@@ -46,10 +73,13 @@ def get_data():
     return df
 
 def run_cycle():
+    init_journal()
     try:
         state = load_state()
         df = get_data()
-        if df.empty: return
+        if df.empty:
+            logging.warning("DataFrame empty, skipping cycle.")
+            return
 
         now_ts = df.index[-1]
         price = float(df['Close'].iloc[-1])
@@ -95,8 +125,9 @@ def run_cycle():
                     "sl": price * (1-SL_PCT) if direction == "LONG" else price * (1+SL_PCT)
                 }
                 save_state(state)
-                print(f"[{now_ts}] OPENED {direction} @ {price}")
+                logging.info(f"OPENED {direction} @ {price}")
 
-    except Exception as e: print(f"ERROR: {str(e)}")
+    except Exception as e:
+        logging.error(f"Cycle error: {str(e)}")
 
 if __name__ == "__main__": run_cycle()
