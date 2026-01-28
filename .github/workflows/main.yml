@@ -39,7 +39,7 @@ jobs:
 
             python live.py
 
-            git add trading_state.json trading_journal.csv
+            git add .
             # Check if there are staged changes
             if ! git diff-index --quiet HEAD; then
               git commit -m "Update logs [skip ci]"
