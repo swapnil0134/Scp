@@ -1,7 +1,9 @@
 name: Trading Bot
 on:
   schedule:
-    - cron: '*/1 * * * *'
+    # Runs every 5 minutes. The internal loop executes the script every minute.
+    # This workaround is necessary because GitHub Actions has a minimum interval of 5 minutes.
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -23,15 +25,39 @@ jobs:
       - name: Install dependencies
         run: pip install pandas requests
 
-      - name: Run Bot
+      - name: Run Bot Loop
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: python live.py
-
-      - name: Save State
         run: |
           git config --global user.name "TradingBot"
           git config --global user.email "bot@github.com"
-          git add trading_state.json trading_journal.csv
-          git commit -m "Update logs [skip ci]" || echo "No changes"
-          git push origin main
+
+          # Run 5 times to cover the 5-minute interval (approx every minute)
+          for i in {1..5}; do
+            echo "Iteration $i..."
+            start_time=$(date +%s)
+
+            python live.py
+
+            git add trading_state.json trading_journal.csv
+            # Check if there are staged changes
+            if ! git diff-index --quiet HEAD; then
+              git commit -m "Update logs [skip ci]"
+              git pull --rebase origin main
+              git push origin main
+            fi
+
+            # Calculate sleep time to maintain 1-minute intervals
+            if [ $i -lt 5 ]; then
+              end_time=$(date +%s)
+              duration=$((end_time - start_time))
+              sleep_time=$((60 - duration))
+
+              if [ $sleep_time -gt 0 ]; then
+                echo "Sleeping for $sleep_time seconds..."
+                sleep $sleep_time
+              else
+                 echo "Execution took longer than 60s ($duration s), skipping sleep."
+              fi
+            fi
+          done
