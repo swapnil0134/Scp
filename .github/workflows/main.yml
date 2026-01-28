@@ -1,7 +1,7 @@
 name: Trading Bot
 on:
   schedule:
-    - cron: '*/1 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -23,15 +23,28 @@ jobs:
       - name: Install dependencies
         run: pip install pandas requests
 
-      - name: Run Bot
+      - name: Run Bot Loop
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: python live.py
-
-      - name: Save State
         run: |
           git config --global user.name "TradingBot"
           git config --global user.email "bot@github.com"
-          git add trading_state.json trading_journal.csv
-          git commit -m "Update logs [skip ci]" || echo "No changes"
-          git push origin main
+
+          # Run 5 times to cover the 5-minute interval (approx every minute)
+          for i in {1..5}; do
+            echo "Iteration $i..."
+            python live.py
+
+            git add trading_state.json trading_journal.csv
+            # Check if there are staged changes
+            if ! git diff-index --quiet HEAD; then
+              git commit -m "Update logs [skip ci]"
+              git pull --rebase origin main
+              git push origin main
+            fi
+
+            # Sleep 60 seconds between iterations, but not after the last one
+            if [ $i -lt 5 ]; then
+              sleep 60
+            fi
+          done
