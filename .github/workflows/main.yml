@@ -1,0 +1,30 @@
+name: Trading Bot
+on:
+  schedule:
+    - cron: '*/1 * * * *' # Every 5 minutes
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows the bot to save files back to your repo
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install pandas requests
+      - name: Run Bot
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: python live.py
+      - name: Save State
+        run: |
+          git config --global user.name "TradingBot"
+          git config --global user.email "bot@github.com"
+          git add trading_state.json trading_journal.csv
+          git commit -m "Update state [skip ci]" || echo "No changes"
+          git push
