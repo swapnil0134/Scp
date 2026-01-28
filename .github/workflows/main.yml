@@ -1,6 +1,8 @@
 name: Trading Bot
 on:
   schedule:
+    # Runs every 5 minutes. The internal loop executes the script every minute.
+    # This workaround is necessary because GitHub Actions has a minimum interval of 5 minutes.
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
@@ -33,6 +35,8 @@ jobs:
           # Run 5 times to cover the 5-minute interval (approx every minute)
           for i in {1..5}; do
             echo "Iteration $i..."
+            start_time=$(date +%s)
+
             python live.py
 
             git add trading_state.json trading_journal.csv
@@ -43,8 +47,17 @@ jobs:
               git push origin main
             fi
 
-            # Sleep 60 seconds between iterations, but not after the last one
+            # Calculate sleep time to maintain 1-minute intervals
             if [ $i -lt 5 ]; then
-              sleep 60
+              end_time=$(date +%s)
+              duration=$((end_time - start_time))
+              sleep_time=$((60 - duration))
+
+              if [ $sleep_time -gt 0 ]; then
+                echo "Sleeping for $sleep_time seconds..."
+                sleep $sleep_time
+              else
+                 echo "Execution took longer than 60s ($duration s), skipping sleep."
+              fi
             fi
           done
